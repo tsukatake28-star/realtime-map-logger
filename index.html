@@ -5,13 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>リアルタイム地図</title>
 
-    <!-- ✅ Leaflet CSS & JS -->
+    <!-- Leaflet CSS -->
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-sA+Bx3i6fDdz+iFZzGxCzD1kC1y4v0v7bA9p+Dn0jF4="
+      crossorigin=""
     />
+
+    <!-- Leaflet JS -->
     <script
       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-o9N1jz87ZL7jqPKeZl5NfB0E/WRHjYUNM8y+R8DkP3s="
+      crossorigin=""
     ></script>
 
     <style>
@@ -32,41 +38,34 @@
 
     <script>
       // 地図を初期化
-      const map = L.map("map").setView([35.68, 139.76], 13);
+      const map = L.map("map").setView([35.68, 139.76], 14);
 
-      // タイルレイヤーを追加（OpenStreetMap）
+      // タイルレイヤー（OpenStreetMap）
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "© OpenStreetMap contributors",
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors",
       }).addTo(map);
 
-      // 現在地マーカーを作成
+      // 現在地マーカーを追加
       const marker = L.marker([35.68, 139.76]).addTo(map);
 
-      // GPS位置を監視して更新
+      // GPS位置を監視してマーカー更新
       if (navigator.geolocation) {
         navigator.geolocation.watchPosition(
           (pos) => {
             const lat = pos.coords.latitude;
             const lng = pos.coords.longitude;
-            const speed = pos.coords.speed || 0;
+            const speed = pos.coords.speed ? pos.coords.speed * 3.6 : 0;
 
-            // 位置を更新
             marker.setLatLng([lat, lng]);
-            map.setView([lat, lng], map.getZoom());
-
-            // 速度表示（マーカーのポップアップ）
-            marker.bindPopup(`速度: ${(speed * 3.6).toFixed(1)} km/h`).openPopup();
+            map.setView([lat, lng]);
+            marker.bindPopup(`速度: ${speed.toFixed(1)} km/h`).openPopup();
           },
-          (err) => {
-            console.error("位置情報エラー:", err);
-          },
-          {
-            enableHighAccuracy: true,
-            maximumAge: 1000,
-          }
+          (err) => console.error("位置情報エラー:", err),
+          { enableHighAccuracy: true, maximumAge: 0 }
         );
       } else {
-        alert("この端末では位置情報が利用できません。");
+        alert("位置情報が利用できません");
       }
     </script>
   </body>
