@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>リアルタイムGPS + ラップ計測</title>
+
+<!-- Leaflet CSS & JS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Ably JS -->
+<script src="https://cdn.ably.io/lib/ably.min-1.js"></script>
+
+<style>
+  html, body { height: 100%; margin: 0; }
+  #map { width: 100%; height: 80%; }
+  #info { height: 20%; padding: 5px; font-size: 16px; background: #f0f0f0; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="info">
+  <p>周回数: <span id="lapCount">0</span></p>
+  <p>最新ラップ: <span id="lapTime">0.0</span> 秒</p>
+  <button id="downloadCSV">CSVダウンロード</button>
+</div>
+
+<script>
+  // --------------------
+  // Leaflet 地図初期化
+  // --------------------
+  const map = L.map("map").setView([35.68, 139.76], 16);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map);
+
+  let marker = L.circleMarker([35.68, 139.76], {
+    radius: 10, color: "green", fillColor: "green", fillOpacity: 0.8
+  }).addTo(map);
+
+  function speedColor(speed){
+    if(speed < 10) return "green";
+    else if(speed < 30) return "yellow";
+    else return "red";
+  }
+
+  // --------------------
+  // Ably 初期化
+  // --------------------
+  const client = new Ably.Realtime('YOUR_ABLY_API_KEY'); // ←自分のキーに置換
+  const channel = client.channels.get('realtime-gps');
+
+  // --------------------
+  // 周回計算用
+  // --------------------
+  const startPoint = {lat: 35.681, lng: 139.766}; // スタート地点
+  let lapTimes = [];
+  let lastLapTime = null;
+  let lapCount = 0;
+
+  function distance(lat1,lng1,lat2,lng2){
+    const R = 6371000;
+    const toRad = (deg) => deg*Math.PI/180;
+    const dLat = toRad(lat2-lat1);
+    const dLng = toRad(lng2-lng1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLng/2)**2;
+    const c = 2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+    return R*c;
+  }
+
+  function checkLap(lat,lng){
+    const d = distance(lat,lng,startPoint.lat,startPoint.lng);
+    if(d<10){
+      const now = Date.now();
+      if(!lastLapTime || now - lastLapTime > 5000){
+        lapCount++;
+        if(lastLapTime){
+          const lap = (now-lastLapTime)/1000;
+          lapTimes.push(lap);
+          document.getElementById("lapTime").textContent = lap.toFixed(1);
+        }
+        lastLapTime = now;
+        document.getElementById("lapCount").textContent = lapCount;
+      }
+    }
+  }
+
+  // --------------------
+  // データ保存
+  // --------------------
+  let savedData = [];
+
+  function saveData(lat,lng,speed){
+    savedData.push({lat,lng,speed,timestamp:Date.now()});
+  }
+
+  document.getElementById("downloadCSV").onclick = ()=>{
+    if(savedData.length===0){ alert("データがありません"); return; }
+    const csv = savedData.map(d=>`${d.lat},${d.lng},${d.speed},${d.timestamp}`).join("\n");
+    const blob = new Blob([csv],{type:"text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "gps_data.csv";
+    a.click();
+  }
+
+  // --------------------
+  // GPS取得・送信
+  // --------------------
+  if(navigator.geolocation){
+    navigator.geolocation.watchPosition((pos)=>{
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const speed = pos.coords.speed ? pos.coords.speed*3.6 : 0;
+
+      // 保存
+      saveData(lat,lng,speed);
+
+      // 周回チェック
+      checkLap(lat,lng);
+
+      // マーカー更新
+      marker.setLatLng([lat,lng]);
+      marker.setStyle({color:speedColor(speed), fillColor:speedColor(speed)});
+      map.setView([lat,lng]);
+      marker.bindPopup(`速度: ${speed.toFixed(1)} km/h`).openPopup();
+
+      // Ably送信
+      channel.publish('update',{lat,lng,speed,lapCount,lapTimes});
+    },
+    (err)=>console.error("位置情報エラー:", err),
+    {enableHighAccuracy:true, maximumAge:0});
+  } else { alert("位置情報が利用できません"); }
+
+  // --------------------
+  // 他端末で受信
+  // --------------------
+  channel.subscribe('update',(msg)=>{
+    const {lat,lng,speed,lapCount:lc, lapTimes:lt} = msg.data;
+    marker.setLatLng([lat,lng]);
+    marker.setStyle({color:speedColor(speed), fillColor:speedColor(speed)});
+    map.setView([lat,lng]);
+    marker.bindPopup(`速度: ${speed.toFixed(1)} km/h`).openPopup();
+
+    // 周回情報更新
+    if(lc>lapCount){
+      lapCount = lc;
+      lapTimes = lt;
+      document.getElementById("lapCount").textContent = lapCount;
+      document.getElementById("lapTime").textContent = lapTimes[lapTimes.length-1].toFixed(1);
+    }
+  });
+</script>
+
+</body>
+</html>
